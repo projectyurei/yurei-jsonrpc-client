@@ -13,7 +13,9 @@
 #include <unistd.h>
 
 #include "logging.h"
+#include "metrics.h"
 #include "parser.h"
+#include "rate_limiter.h"
 
 typedef struct {
     char *data;
@@ -83,6 +85,11 @@ static void *poller_thread(void *arg) {
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
 
     while (poller->running) {
+        // Apply rate limiting before making request
+        if (poller->rate_limiter) {
+            yurei_rate_limiter_wait(poller->rate_limiter);
+        }
+
         char payload[512];
         char mentions[256];
         build_mentions_array(poller->config, mentions, sizeof(mentions));
@@ -103,21 +110,53 @@ static void *poller_thread(void *arg) {
                      mentions);
         }
 
+        YUREI_LOG_TRACE("HTTP request: %s", payload);
+
         CurlBuffer buffer = {.data = NULL, .length = 0};
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
 
+        // Measure request latency
+        struct timespec start, end;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        
         CURLcode rc = curl_easy_perform(curl);
+        
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        uint64_t latency_us = (end.tv_sec - start.tv_sec) * 1000000 +
+                              (end.tv_nsec - start.tv_nsec) / 1000;
+
         if (rc == CURLE_OK && buffer.data) {
+            // Track metrics
+            if (poller->metrics) {
+                yurei_metrics_request(poller->metrics, true, latency_us);
+                yurei_metrics_bytes(poller->metrics, buffer.length);
+            }
+            
             uint64_t highest_slot = poller->last_slot;
             int processed = yurei_parser_handle_message(
                 buffer.data, poller->config, poller->queue, &highest_slot);
+            
+            if (processed > 0) {
+                YUREI_LOG_DEBUG("HTTP poll: processed %d events, latency=%" PRIu64 "us", 
+                               processed, latency_us);
+                if (poller->metrics) {
+                    for (int i = 0; i < processed; i++) {
+                        yurei_metrics_event(poller->metrics);
+                    }
+                }
+            }
+            
             if (processed > 0 && highest_slot > poller->last_slot) {
                 poller->last_slot = highest_slot;
             }
         } else {
-            YUREI_LOG_WARN("HTTP poll failed: %s", curl_easy_strerror(rc));
+            YUREI_LOG_WARN("HTTP poll failed: %s (latency=%" PRIu64 "us)", 
+                          curl_easy_strerror(rc), latency_us);
+            if (poller->metrics) {
+                yurei_metrics_request(poller->metrics, false, latency_us);
+            }
         }
 
         free(buffer.data);
@@ -131,7 +170,9 @@ static void *poller_thread(void *arg) {
 
 int yurei_http_poller_start(YureiHttpPoller *poller,
                             const YureiConfig *config,
-                            YureiEventQueue *queue) {
+                            YureiEventQueue *queue,
+                            YureiMetrics *metrics,
+                            YureiRateLimiter *rate_limiter) {
     if (!poller || !config || !queue) {
         return -1;
     }
@@ -142,6 +183,8 @@ int yurei_http_poller_start(YureiHttpPoller *poller,
     memset(poller, 0, sizeof(*poller));
     poller->config = config;
     poller->queue = queue;
+    poller->metrics = metrics;
+    poller->rate_limiter = rate_limiter;
     poller->running = true;
 
     if (pthread_create(&poller->thread, NULL, poller_thread, poller) != 0) {

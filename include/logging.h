@@ -4,18 +4,22 @@
 #ifndef YUREI_LOGGING_H
 #define YUREI_LOGGING_H
 
+#include <stdbool.h>
 #include <stdarg.h>
 
 typedef enum {
-    YUREI_LOG_DEBUG = 0,
+    YUREI_LOG_TRACE = 0,
+    YUREI_LOG_DEBUG,
     YUREI_LOG_INFO,
     YUREI_LOG_WARN,
     YUREI_LOG_ERROR
 } YureiLogLevel;
 
 void yurei_log_set_level(YureiLogLevel level);
+void yurei_log_set_color(bool enabled);
 void yurei_log(YureiLogLevel level, const char *fmt, ...);
 
+#define YUREI_LOG_TRACE(fmt, ...) yurei_log(YUREI_LOG_TRACE, fmt, ##__VA_ARGS__)
 #define YUREI_LOG_DEBUG(fmt, ...) yurei_log(YUREI_LOG_DEBUG, fmt, ##__VA_ARGS__)
 #define YUREI_LOG_INFO(fmt, ...) yurei_log(YUREI_LOG_INFO, fmt, ##__VA_ARGS__)
 #define YUREI_LOG_WARN(fmt, ...) yurei_log(YUREI_LOG_WARN, fmt, ##__VA_ARGS__)

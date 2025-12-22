@@ -10,18 +10,24 @@
 
 #include "config.h"
 #include "event_queue.h"
+#include "metrics.h"
+#include "rate_limiter.h"
 
 typedef struct {
     bool running;
     pthread_t thread;
     const YureiConfig *config;
     YureiEventQueue *queue;
+    YureiMetrics *metrics;
+    YureiRateLimiter *rate_limiter;
     uint64_t last_slot;
 } YureiHttpPoller;
 
 int yurei_http_poller_start(YureiHttpPoller *poller,
                             const YureiConfig *config,
-                            YureiEventQueue *queue);
+                            YureiEventQueue *queue,
+                            YureiMetrics *metrics,
+                            YureiRateLimiter *rate_limiter);
 void yurei_http_poller_stop(YureiHttpPoller *poller);
 
 #endif // YUREI_HTTP_POLLER_H

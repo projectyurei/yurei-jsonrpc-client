@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(yurei-jsonrpc-client VERSION 1.0.0 LANGUAGES C)
+project(yurei-jsonrpc-client VERSION 1.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -22,7 +22,9 @@ add_executable(yurei-jsonrpc-client
     src/parser.c
     src/websocket_client.c
     src/http_poller.c
-    src/db_writer.c)
+    src/db_writer.c
+    src/metrics.c
+    src/rate_limiter.c)
 
 # Project include tree
 file(GLOB PROJECT_HEADERS "include/*.h")
@@ -41,6 +43,14 @@ foreach(flag ${LIBWEBSOCKETS_CFLAGS_OTHER} ${LIBCURL_CFLAGS_OTHER} ${CJSON_CFLAG
     target_compile_options(yurei-jsonrpc-client PRIVATE ${flag})
 endforeach()
 
+# Release build optimizations
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(yurei-jsonrpc-client PRIVATE
+        -O3 -flto -march=native -DNDEBUG)
+    target_link_options(yurei-jsonrpc-client PRIVATE -flto)
+    message(STATUS "Release build: -O3 -flto -march=native optimizations enabled")
+endif()
+
 # Link external dependencies
 set(THIRD_PARTY_LIBS
     ${LIBWEBSOCKETS_LIBRARIES}
@@ -58,3 +68,4 @@ find_package(Threads REQUIRED)
 target_link_libraries(yurei-jsonrpc-client PRIVATE ${THIRD_PARTY_LIBS} Threads::Threads)
 
 install(TARGETS yurei-jsonrpc-client RUNTIME DESTINATION bin)
+
